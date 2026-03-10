@@ -1,0 +1,14 @@
+# Build output
+freewheel.exe
+freewheel.exe~
+freewheel.syso
+
+# Embedded APKs (binary, tracked separately)
+*.apk
+
+# IDE
+.idea/
+.vscode/
+
+# Go
+vendor/
