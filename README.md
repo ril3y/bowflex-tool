@@ -1,51 +1,78 @@
+<p align="center">
+  <img src="assets/logo.png" alt="FreeWheel" width="120">
+</p>
+
 # FreeWheel
 
 **Custom firmware launcher for the Bowflex Velocore bike.**
 
-FreeWheel replaces the stock JRNY app with VeloLauncher — an open-source fitness platform that lets you ride with Netflix, play retro games, and track your workouts without a subscription.
+FreeWheel replaces the stock JRNY app with [VeloLauncher](https://github.com/ril3y/velo-platform) — an open-source fitness platform that lets you ride with Netflix, track workouts, and use the bike without a subscription.
 
-## What it does
+No command-line tools, Android SDK, or USB cable required. Just download, run, and follow 3 steps.
 
-1. **Scans** your network for a Bowflex Velocore bike with ADB enabled
-2. **Pre-checks** device compatibility (Android 9, Rockchip board, JRNY version)
-3. **Jailbreaks** — disables JRNY, installs VeloLauncher + SerialBridge
-4. **Restores** — one-click revert to stock Nautilus configuration
+## Setup
 
-## Requirements
+### Step 1: Enable ADB on the bike
 
-- Bowflex Velocore C9 or C10 bike
-- WiFi network (bike and PC on same network)
-- ADB debugging enabled on the bike (see setup guide)
-- Windows PC
+1. Power on your Velocore bike and wait for the JRNY boot screen
+2. **Tap the top-right corner of the screen 9 times rapidly** — this opens the hidden "Advanced User Actions" menu
+3. Open the **Utility App**
+4. The Utility App enables ADB over WiFi automatically (port 5555)
+5. Leave the Utility App running — do NOT close it
 
-## Quick Start
+### Step 2: Run FreeWheel on your PC
 
-1. Download `freewheel.exe` from [Releases](https://github.com/ril3y/bowflex-tool/releases)
-2. Enable ADB on your bike (Settings → Developer Options → USB Debugging → ON)
-3. Run `freewheel.exe`
-4. Click **Scan Network** to find your bike
-5. Click **Pre-Check** to verify compatibility
-6. Click **Jailbreak!** to install VeloLauncher
+1. Download `freewheel.exe` from [Releases](https://github.com/ril3y/freewheel/releases)
+2. Run it (no installation needed)
+3. Click **Scan Network** — FreeWheel will find your bike on the local network
+4. If scan doesn't find it, enter the bike's IP address manually
+
+### Step 3: Jailbreak
+
+1. Click **Pre-Check** — verifies your bike is compatible (Android 9, Rockchip board, correct JRNY version)
+2. Click **Jailbreak!**
+3. **On the bike**: tap **Allow** when the USB debugging authorization prompt appears
+4. Wait for the 8-step process to complete (~2 minutes)
+5. The bike will restart with VeloLauncher as the home screen
+
+If anything fails, FreeWheel automatically restores the bike to stock.
 
 ## What gets installed
 
 | App | Purpose |
 |-----|---------|
-| **VeloLauncher** | Custom home screen with workout picker, ride tracking, media overlay, OTA updates |
-| **SerialBridge** | Bridges the bike's UCB hardware (sensors, resistance) to Android apps |
+| **VeloLauncher** | Custom home screen — workouts, free ride, media overlay, ride history, settings, OTA updates |
+| **SerialBridge** | Platform-signed service that bridges the bike's hardware sensors to Android apps |
 
-## Features after jailbreak
+## Features
 
-- **Free ride** or **structured workouts** with real-time power, RPM, heart rate
-- **Netflix/YouTube overlay** — watch media while riding with floating stats
-- **Auto-pause** when you stop pedaling
-- **Ride history** with stats tracking
-- **OTA updates** — the launcher checks for updates automatically
-- **Third-party fitness apps** via the WorkoutSession API (see [Developer Guide](https://github.com/ril3y/velo-platform/blob/main/DEVELOPER.md))
+- **Structured workouts** with segments, difficulty scaling, and auto-pause when you stop pedaling
+- **Free ride** mode — just ride and track stats
+- **Netflix/YouTube overlay** — watch media with floating ride stats on top
+- **5-4-3-2-1 countdown** before workouts start
+- **Ride summary** after every workout (calories, power, RPM, distance, heart rate)
+- **Ride history** with streak tracking
+- **OTA updates** — the launcher checks for updates from GitHub automatically
+- **Third-party fitness app support** via the WorkoutSession API
 
 ## Restore to stock
 
-Click **Restore Stock** in FreeWheel to revert everything. The bike will return to the original JRNY experience.
+Open FreeWheel and click **Restore Stock**. Everything reverts to the original JRNY experience in ~1 minute.
+
+## Troubleshooting
+
+**Can't find the bike on the network?**
+- Make sure your PC and bike are on the same WiFi network
+- Make sure the Utility App is running on the bike
+- Try entering the bike's IP address manually (check your router's connected devices)
+
+**"Pre-Check failed"?**
+- Only Velocore C9/C10 bikes are supported (Android 9, Rockchip board)
+- JRNY version 2.25.1 is tested; other versions may work but aren't guaranteed
+
+**Bike stuck after jailbreak?**
+- Swipe up from the bottom edge of the screen to get home (invisible gesture zone)
+- If completely stuck, use FreeWheel's Restore Stock feature from your PC
 
 ## Building from source
 
@@ -53,12 +80,12 @@ Click **Restore Stock** in FreeWheel to revert everything. The bike will return 
 go build -o freewheel.exe ./cmd/freewheel
 ```
 
-Requires Go 1.25+ and the Fyne GUI toolkit dependencies.
+Requires Go 1.25+ with Fyne GUI toolkit.
 
-## Related projects
+## Related
 
-- [velo-platform](https://github.com/ril3y/velo-platform) — VeloLauncher, SerialBridge, and fitness SDK
-- [bike-arcade](https://github.com/ril3y/bike-arcade) — Retro arcade games controlled by pedaling (separate app)
+- [velo-platform](https://github.com/ril3y/velo-platform) — VeloLauncher source, SerialBridge, fitness SDK
+- [Developer Guide](https://github.com/ril3y/velo-platform/blob/main/DEVELOPER.md) — Build fitness apps for the platform
 
 ## License
 
