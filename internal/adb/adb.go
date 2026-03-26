@@ -1,4 +1,4 @@
-package main
+package adb
 
 import (
 	"bytes"
@@ -44,8 +44,8 @@ type adbMessage struct {
 	Magic   uint32
 }
 
-// AdbConn represents a direct connection to a device's adbd.
-type AdbConn struct {
+// Conn represents a direct connection to a device's adbd.
+type Conn struct {
 	conn    net.Conn
 	localID uint32
 }
@@ -147,7 +147,8 @@ func modInverse32(n uint64) uint64 {
 	return x
 }
 
-func adbConnect(host string, port int, logFn ...func(string)) (*AdbConn, error) {
+// Connect establishes a direct ADB connection to a device.
+func Connect(host string, port int, logFn ...func(string)) (*Conn, error) {
 	logMsg := func(msg string) {
 		if len(logFn) > 0 && logFn[0] != nil {
 			logFn[0](msg)
@@ -160,7 +161,7 @@ func adbConnect(host string, port int, logFn ...func(string)) (*AdbConn, error) 
 		return nil, fmt.Errorf("TCP connect failed: %w", err)
 	}
 
-	ac := &AdbConn{conn: conn, localID: 1}
+	ac := &Conn{conn: conn, localID: 1}
 
 	// Send CNXN
 	banner := "host::features=shell_v2,cmd,stat_v2,ls_v2,fixed_push_mkdir,apex,abb,fixed_push_symlink_timestamp,abb_exec,remount_shell,track_app,sendrecv_v2,sendrecv_v2_brotli,sendrecv_v2_lz4,sendrecv_v2_zstd,sendrecv_v2_dry_run_send,openscreen_mdns,push_sync"
@@ -193,15 +194,12 @@ func adbConnect(host string, port int, logFn ...func(string)) (*AdbConn, error) 
 			}
 
 			if msg.Arg0 == authToken {
-				// First: try signing the token with our RSA key
-				// ADB: token is a 20-byte nonce, sign it directly as if it's a SHA1 digest
 				signature, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA1, data)
 				if err == nil {
 					if err := ac.sendMsg(cmdAUTH, authSig, 0, signature); err != nil {
 						conn.Close()
 						return nil, fmt.Errorf("send auth signature failed: %w", err)
 					}
-					// Read response — might get CNXN (if key known) or another AUTH (need to send pubkey)
 					msg2, data2, err := ac.readMsg()
 					if err != nil {
 						conn.Close()
@@ -211,14 +209,12 @@ func adbConnect(host string, port int, logFn ...func(string)) (*AdbConn, error) 
 						_ = data2
 						return ac, nil
 					}
-					// Got another AUTH — device doesn't know our key, send public key
 					if msg2.Command == cmdAUTH {
 						pubKeyData := adbPubKey(key)
 						if err := ac.sendMsg(cmdAUTH, authRSAKey, 0, pubKeyData); err != nil {
 							conn.Close()
 							return nil, fmt.Errorf("send public key failed: %w", err)
 						}
-						// User must accept on device screen — wait longer
 						if !authMessageShown {
 							logMsg("Waiting for USB debugging authorization on bike screen...")
 							logMsg("Tap ALLOW on the bike (check 'Always allow' box)")
@@ -239,15 +235,50 @@ func adbConnect(host string, port int, logFn ...func(string)) (*AdbConn, error) 
 	}
 }
 
+// IsADBPort checks if a TCP connection on port 5555 is actually an ADB daemon.
+func IsADBPort(ip string) bool {
+	c, err := net.DialTimeout("tcp", ip+":5555", 500*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	defer c.Close()
+	c.SetDeadline(time.Now().Add(1 * time.Second))
 
-func (ac *AdbConn) Close() {
+	banner := []byte("host::\x00")
+	var buf [24]byte
+	binary.LittleEndian.PutUint32(buf[0:], cmdCNXN)
+	binary.LittleEndian.PutUint32(buf[4:], adbVersion)
+	binary.LittleEndian.PutUint32(buf[8:], maxPayload)
+	binary.LittleEndian.PutUint32(buf[12:], uint32(len(banner)))
+	var crc uint32
+	for _, b := range banner {
+		crc += uint32(b)
+	}
+	binary.LittleEndian.PutUint32(buf[16:], crc)
+	binary.LittleEndian.PutUint32(buf[20:], cmdCNXN^0xFFFFFFFF)
+	if _, err := c.Write(buf[:]); err != nil {
+		return false
+	}
+	if _, err := c.Write(banner); err != nil {
+		return false
+	}
+
+	var resp [24]byte
+	if _, err := io.ReadFull(c, resp[:]); err != nil {
+		return false
+	}
+	cmd := binary.LittleEndian.Uint32(resp[0:])
+	return cmd == cmdCNXN || cmd == cmdAUTH
+}
+
+func (ac *Conn) Close() {
 	if ac.conn != nil {
 		ac.conn.Close()
 	}
 }
 
 // Shell runs a command and returns output.
-func (ac *AdbConn) Shell(cmd string) (string, error) {
+func (ac *Conn) Shell(cmd string) (string, error) {
 	localID := ac.nextID()
 	dest := "shell:" + cmd + "\x00"
 
@@ -255,13 +286,11 @@ func (ac *AdbConn) Shell(cmd string) (string, error) {
 		return "", err
 	}
 
-	// Wait for OKAY
 	remoteID, err := ac.waitOkay(localID)
 	if err != nil {
 		return "", fmt.Errorf("shell open failed: %w", err)
 	}
 
-	// Read all WRTE data until CLSE
 	var buf bytes.Buffer
 	for {
 		msg, data, err := ac.readMsg()
@@ -280,7 +309,7 @@ func (ac *AdbConn) Shell(cmd string) (string, error) {
 }
 
 // Push sends a file to the device.
-func (ac *AdbConn) Push(localPath, remotePath string, mode uint32) error {
+func (ac *Conn) Push(localPath, remotePath string, mode uint32) error {
 	data, err := os.ReadFile(localPath)
 	if err != nil {
 		return fmt.Errorf("read local file: %w", err)
@@ -288,7 +317,6 @@ func (ac *AdbConn) Push(localPath, remotePath string, mode uint32) error {
 
 	localID := ac.nextID()
 
-	// Open sync service
 	if err := ac.sendMsg(cmdOPEN, localID, 0, []byte("sync:\x00")); err != nil {
 		return err
 	}
@@ -298,7 +326,6 @@ func (ac *AdbConn) Push(localPath, remotePath string, mode uint32) error {
 		return fmt.Errorf("sync open failed: %w", err)
 	}
 
-	// SEND command
 	sendPath := fmt.Sprintf("%s,%d", remotePath, mode)
 	sendHeader := make([]byte, 8)
 	copy(sendHeader[0:4], "SEND")
@@ -312,7 +339,6 @@ func (ac *AdbConn) Push(localPath, remotePath string, mode uint32) error {
 		return fmt.Errorf("SEND ack failed: %w", err)
 	}
 
-	// Send file data in chunks
 	const chunkSize = 64 * 1024
 	for offset := 0; offset < len(data); offset += chunkSize {
 		end := offset + chunkSize
@@ -334,7 +360,6 @@ func (ac *AdbConn) Push(localPath, remotePath string, mode uint32) error {
 		}
 	}
 
-	// DONE with mtime
 	doneMsg := make([]byte, 8)
 	copy(doneMsg[0:4], "DONE")
 	binary.LittleEndian.PutUint32(doneMsg[4:8], uint32(time.Now().Unix()))
@@ -346,7 +371,6 @@ func (ac *AdbConn) Push(localPath, remotePath string, mode uint32) error {
 		return fmt.Errorf("DONE ack failed: %w", err)
 	}
 
-	// Read OKAY/FAIL response from sync
 	msg, respData, err := ac.readMsg()
 	if err != nil {
 		return err
@@ -369,7 +393,7 @@ func (ac *AdbConn) Push(localPath, remotePath string, mode uint32) error {
 }
 
 // Pull downloads a file from the device.
-func (ac *AdbConn) Pull(remotePath, localPath string) error {
+func (ac *Conn) Pull(remotePath, localPath string) error {
 	localID := ac.nextID()
 
 	if err := ac.sendMsg(cmdOPEN, localID, 0, []byte("sync:\x00")); err != nil {
@@ -421,8 +445,8 @@ func (ac *AdbConn) Pull(remotePath, localPath string) error {
 }
 
 // Install pushes an APK to /data/local/tmp and runs pm install.
-func (ac *AdbConn) Install(localPath string) error {
-	tmpPath := "/data/local/tmp/_jailbreak.apk"
+func (ac *Conn) Install(localPath string) error {
+	tmpPath := "/data/local/tmp/_install.apk"
 	if err := ac.Push(localPath, tmpPath, 0644); err != nil {
 		return fmt.Errorf("push APK: %w", err)
 	}
@@ -439,7 +463,7 @@ func (ac *AdbConn) Install(localPath string) error {
 
 // --- Wire protocol ---
 
-func (ac *AdbConn) sendMsg(cmd, arg0, arg1 uint32, data []byte) error {
+func (ac *Conn) sendMsg(cmd, arg0, arg1 uint32, data []byte) error {
 	msg := adbMessage{
 		Command: cmd,
 		Arg0:    arg0,
@@ -459,7 +483,7 @@ func (ac *AdbConn) sendMsg(cmd, arg0, arg1 uint32, data []byte) error {
 	return nil
 }
 
-func (ac *AdbConn) readMsg() (adbMessage, []byte, error) {
+func (ac *Conn) readMsg() (adbMessage, []byte, error) {
 	var msg adbMessage
 	ac.conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 	if err := binary.Read(ac.conn, binary.LittleEndian, &msg); err != nil {
@@ -475,7 +499,7 @@ func (ac *AdbConn) readMsg() (adbMessage, []byte, error) {
 	return msg, data, nil
 }
 
-func (ac *AdbConn) waitOkay(localID uint32) (uint32, error) {
+func (ac *Conn) waitOkay(localID uint32) (uint32, error) {
 	for {
 		msg, _, err := ac.readMsg()
 		if err != nil {
@@ -494,7 +518,7 @@ func (ac *AdbConn) waitOkay(localID uint32) (uint32, error) {
 	}
 }
 
-func (ac *AdbConn) nextID() uint32 {
+func (ac *Conn) nextID() uint32 {
 	ac.localID++
 	return ac.localID
 }

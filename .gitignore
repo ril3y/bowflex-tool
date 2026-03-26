@@ -2,6 +2,7 @@
 freewheel.exe
 freewheel.exe~
 freewheel.syso
+*.syso
 
 # Embedded APKs (binary, tracked separately)
 *.apk
